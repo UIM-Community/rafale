@@ -20,8 +20,6 @@ my $HASH_Robot;
 my $Probe_NAME  = "rafale";
 my $Probe_VER   = "1.0";
 my $Probe_CFG   = "rafale.cfg";
-nimTimerStart($T_Heartbeat);
-nimTimerStart($T_QOS);
 $SIG{__DIE__} = \&scriptDieHandler;
 
 my $Logger = uimLogger({
@@ -199,7 +197,6 @@ $handleAlarm = sub {
         }
     }
     $Logger->info("Thread finished!");
-    return 1;
 };
 
 # Wait for group threads
@@ -240,7 +237,7 @@ $probe->on( timeout => sub {
 sub hubpost {
     my ($hMsg,$udata,$full) = @_;
     my $pending = $alarmQueue->pending() || 0; 
-    if($pending >= $INT_StormProtection) {
+    if($INT_StormProtection != 0 && $pending >= $INT_StormProtection) {
         my $nimid = pdsGet_PCH($full,"nimid");
         $Logger->log(1,"Dropping alarm with nimid $nimid");
         nimSendReply($hMsg);
