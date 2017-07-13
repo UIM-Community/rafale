@@ -10,6 +10,7 @@ CA UIM - High performance rafale mode probe
     debug = 0 <!-- advanced debug mode -->
     post_subject = alarm2 <!-- subject where pds are posted when enrichment is done -->
     pool_threads = 3 <!-- number of threads in the pool -->
+    storm_protection = 1000 <!-- storm protection -->
     <!-- queue_attach = queueName -->
     <!-- login = administrator -->
     <!-- password = password -->

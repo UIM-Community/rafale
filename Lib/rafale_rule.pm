@@ -25,6 +25,9 @@ sub processAlarm {
         return 0 if !defined $fieldValue->{$_};
         $fieldValue = $fieldValue->{$_};
     }
+    if(defined $self->{severity}) {
+        return 0 if $self->{severity} != $PDSRef->{udata}->{severity};
+    }
     return $self->isMatch(${fieldValue});
 }
 

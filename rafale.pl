@@ -12,9 +12,10 @@ use Perluim::API;
 use Perluim::Addons::CFGManager;
 
 # Global variables
-my ($STR_Login,$STR_Password,$STR_NIMDomain,$BOOL_DEBUG,$STR_NBThreads,$BOOL_ExclusiveRafale,$INT_Logsize);
+my ($STR_Login,$STR_Password,$STR_NIMDomain,$BOOL_DEBUG,$STR_NBThreads,$BOOL_ExclusiveRafale,$INT_Logsize,$INT_StormProtection);
 my ($STR_ReadSubject,$STR_PostSubject);
 my %RafaleRules = ();
+my %RulesSQLData = ();
 my $HASH_Robot;
 my $Probe_NAME  = "rafale";
 my $Probe_VER   = "1.0";
@@ -57,7 +58,8 @@ sub read_configuration {
     $INT_Logsize             = $CFGManager->get("logsize",1024);
     $STR_ReadSubject         = $CFGManager->get("queue_attach",$Probe_NAME);
     $STR_PostSubject         = $CFGManager->get("post_subject");
-    $STR_NBThreads           = $CFGManager->get("pool_threads",10);
+    $STR_NBThreads           = $CFGManager->get("pool_threads",5);
+    $INT_StormProtection     = $CFGManager->get('storm_protection',1000);
     $Logger->setSize($INT_Logsize);
     $Logger->truncate();
 
@@ -72,7 +74,7 @@ sub read_configuration {
         my $match_alarm_regexp          = $CFGManager->get("match_alarm_regexp");
         my $required_alarm_count        = $CFGManager->get("required_alarm_rowcount",2);
         my $required_alarm_interval     = $CFGManager->get("required_alarm_interval",60);
-        my $required_alarm_severity     = $CFGManager->get("required_alarm_severity",5);
+        my $required_alarm_severity     = $CFGManager->get("required_alarm_severity");
         my $trigger_alarm_on_match      = $CFGManager->get("trigger_alarm_on_match","yes");
         if(defined $match_alarm_field && defined $match_alarm_regexp) {
             $RafaleRules{$RuleSection} = Lib::rafale_rule->new({
@@ -128,6 +130,9 @@ $Logger->info("ROBOTNAME => $HASH_Robot->{robotname}");
 $Logger->info("VERSION => $HASH_Robot->{version}");
 $Logger->nolevel("--------------------------------");
 
+#
+# Generate new alarm method
+#
 sub GenerateAlarm {
     my ($PDSHash) = @_;
     if(defined $PDSHash->{os_user1}) {
@@ -147,6 +152,21 @@ sub GenerateAlarm {
 }
 
 #
+# SQL handle thread!
+#
+my $SQLHandleThread = threads->create(sub {
+    for (;;) {
+        my $start = time;
+        $Logger->log(1,"SQLHandle Interval executed...");
+        # do work here ! 
+        if ((my $remaining = 60000 - (time - $start)) > 0) {
+            sleep $remaining;
+        }
+    }
+});
+$SQLHandleThread->detach();
+
+#
 # Threads pool
 #
 my $handleAlarm;
@@ -156,6 +176,23 @@ $handleAlarm = sub {
     while ( defined ( my $PDSHash = $alarmQueue->dequeue() ) ) {
         if(defined $PDSHash->{rafale}) {
             my $rafale_name = $PDSHash->{rafale};
+            if(defined $RulesSQLData{$rafale_name}) {
+                my $rowCount;
+                {
+                    lock($RulesSQLData{$rafale_name});
+                    $rowCount = $RulesSQLData{$rafale_name}->{row_count};
+                }
+            }
+            else {
+                my %SQLRow : shared = (
+                    row_count => 0,
+                    updated => time(),
+                    source => $PDSHash->{source},
+                    origin => $PDSHash->{origin},
+                    domain => $PDSHash->{domain}
+                );
+                $RulesSQLData{$rafale_name} = \%SQLRow;
+            }
         }
         else {
             GenerateAlarm($PDSHash);
@@ -202,6 +239,13 @@ $probe->on( timeout => sub {
 # Hubpost handle!
 sub hubpost {
     my ($hMsg,$udata,$full) = @_;
+    my $pending = $alarmQueue->pending() || 0; 
+    if($pending >= $INT_StormProtection) {
+        my $nimid = pdsGet_PCH($full,"nimid");
+        $Logger->log(1,"Dropping alarm with nimid $nimid");
+        nimSendReply($hMsg);
+        return;
+    }
     my $PDSHash = Nimbus::PDS->new($full)->asHash();
     my $rafaleMatch = 0;
     foreach my $rafaleName (keys %RafaleRules) {
@@ -222,19 +266,10 @@ $probe->start;
 $Logger->nolevel("--------------------------------");
 
 #
-# Main method (called in timeout callback of the probe).
-#
-sub main {
-    $Logger->info('Main executed!');
-}
-
-#
 # get_info callback!
 #
 sub get_info {
     my ($hMsg) = @_;
     $Logger->log(0,"get_info callback triggered !");
-    my $PDS = Nimbus::PDS->new; 
-    $PDS->put('state','ok',PDS_PCH);
-    nimSendReply($hMsg,NIME_OK,$PDS);
+    nimSendReply($hMsg,NIME_OK);
 }
