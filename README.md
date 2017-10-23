@@ -1,6 +1,8 @@
 # rafale
 CA UIM - High performance rafale mode probe
 
+> Note : The code is not finished (i will continue sooner when i have free time for UIM)
+
 # Configuration overview
 
 ```xml
